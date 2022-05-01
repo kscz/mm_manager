@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # www.github.com/hharte/mm_manager
 #
-# (c) 2020, Howard M. Harte
+# (c) 2020-2022, Howard M. Harte
 #
 # This script generates LCD tables for the Nortel Millennium Payphone.
 # It generates the LCD tables by looking up information from
@@ -67,7 +67,7 @@ parser.add_argument("--age", help="age in days of LATA data before refresh", def
 args = parser.parse_args()
 
 print("LCD Table Generator for the Nortel Millennium Payphone")
-print("(c) 2020, Howard M. Harte\n")
+print("(c) 2020-2022, Howard M. Harte\n")
 
 my_npa = args.npa
 my_nxx = args.nxx
@@ -161,9 +161,13 @@ for i in sorted (npa_dict):
 
 if args.debug: print("NPAs for these rate centers: " + str(lcd_npas))
 
+# Generate Double-Compressed LCD Tables
 # Start with table 136 (0x88)
+#
+# MTR 2.x supports only Double-Compressed LCD tables (16 maximum.)
 table = 136
 
+print("Generating MTR 2.x (Double-Compressed) tables:")
 # Loop through list of LCD NPAs for which we need to generate tables.
 for i in lcd_npas:
     if table > 155:
@@ -171,7 +175,7 @@ for i in lcd_npas:
         break
 
     fname = "mm_table_" + hex(table)[2:4] + ".bin"
-    print("Generating double-compressed LCD table " + fname + " for NPA " + i + ".")
+    print("    Double-compressed LCD table " + fname + " for NPA " + i + ".")
 
     npa_h = int(int(i) / 100)
     npa_t = int((int(i) - (npa_h * 100)) / 10)
@@ -211,5 +215,103 @@ for i in lcd_npas:
     # Proceed to next table
     table = table + 1
     if table == 150: table = 154
+
+# Generate Uncompressed / Compressed LCD Tables
+# Uncompressed tables start with table 74 (0x4a)
+# Compressed tables start with 101 (0x65)
+#
+# MTR 1.7 only supports uncompressed tables (maximum of 10 NPAs.)
+# MTR 1.9 supports uncompressed tables for the first 10 NPAs, and
+#         can have an additional 7 compressed tables for a total
+#         of 17 NPAs maximum.
+table = 74
+
+print("Generating MTR 1.7 (Uncompressed) / 1.9 (Uncompressed, Compressed) tables:")
+# Loop through list of LCD NPAs for which we need to generate tables.
+for i in lcd_npas:
+    if table > 107:
+        print("Error: maximum of 17 Uncompressed LCD tables reached.")
+        break
+
+    fname = "mm_table_" + hex(table)[2:4] + ".bin"
+
+    term_npa_h = int(int(my_npa) / 100)
+    term_npa_t = int((int(my_npa) - (term_npa_h * 100)) / 10)
+    term_npa_o = int((int(my_npa) - (term_npa_h * 100)) - (term_npa_t * 10))
+
+    term_nxx_h = int(int(my_nxx) / 100)
+    term_nxx_t = int((int(my_nxx) - (term_nxx_h * 100)) / 10)
+    term_nxx_o = int((int(my_nxx) - (term_nxx_h * 100)) - (term_nxx_t * 10))
+
+    term_npa_h = term_npa_h << 4
+    term_npa_h = term_npa_h | term_npa_t
+    term_npa_o = term_npa_o << 4
+    term_npa_o = term_npa_o | term_nxx_h
+    term_nxx_h = term_nxx_t << 4
+    term_nxx_h = term_nxx_h | term_nxx_o
+
+    npa_h = int(int(i) / 100)
+    npa_t = int((int(i) - (npa_h * 100)) / 10)
+    npa_o = int((int(i) - (npa_h * 100)) - (npa_t * 10))
+
+    npa_h = npa_h << 4
+    npa_h = npa_h | npa_t
+    npa_o = npa_o << 4
+    npa_o = npa_o | 0x0e
+
+    if table > 91:
+        # Compressed LCD: Start the table array with first 3 digits of NPA followed by 0xe.
+        a = array.array('B', [npa_h, npa_o])
+        print("    Compressed   LCD table " + fname + " for NPA " + i)
+    else:
+        # Uncompressed LCD: Start the table array with the terminal's NPANXX, followed by
+        # the first 3 digits of the called NPA, followed by 0xe.
+        a = array.array('B', [term_npa_h, term_npa_o, term_nxx_h, npa_h, npa_o])
+        print("    Uncompressed LCD table " + fname + " for NPA " + i + ".")
+
+    stflag = 0
+
+# 0 Local
+# 1 LMS (future)
+# 2 Intra-lata Toll
+# 3 Invalid NPA/NXX
+# 4 Inter-lata Toll
+    for index in range(200, 1000): #, row in allnpa.iterrows():
+        cur_npanxx = str(i) + "-" + str(index)
+
+        if cur_npanxx in npanxx_dict:
+            flag = npanxx_dict.get(cur_npanxx)
+        else:
+            flag = 3    # No entry in NPA table, means invalid.
+
+        if table <= 91:
+            # Uncompressed table, each entry is one byte.
+            a.append(flag)
+        else:
+            # Pack into Compressed LCD byte
+            stflag = stflag << 4
+            stflag = stflag | flag
+
+            # Every 2nd entry, add compressed LCD byte to table.
+            if index % 2 == 1:
+                a.append(stflag)
+                stflag = 0
+
+    if table <= 91:
+        # Uncompressed tables have 13 byges of padding at the end.
+        for index in range(0, 13):
+            a.append(0)
+
+    # Write LCD table array to file.
+    f=open(fname, "wb")
+    a.tofile(f)
+
+    # Proceed to next table
+    table = table + 1
+    if table == 82: table = 90
+    if table == 92: table = 101
+
+if table > 101:
+    print("* * * WARNING: "  + str(my_npa) + "-" + str(my_nxx) + " has more than 10 NPAs and cannot be supported by MTR 1.7.")
 
 print("Successfully completed generating LCD tables.")
