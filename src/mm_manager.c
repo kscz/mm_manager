@@ -824,7 +824,7 @@ static int process_mm_table(mm_context_t* context, mm_table_t* table) {
                     printf("Attempting capture...\n");
                     char auth_code[16];
                     snprintf(auth_code, sizeof(auth_code), "%06" PRIu64, cdr->auth_code);
-                    int32_t capture_res = shadybank_capture(sb_client, ((float)cdr->call_cost[1] / 100), auth_code);
+                    int32_t capture_res = shadybank_capture(sb_client, ((double)cdr->call_cost[1] / 100), auth_code);
                     if (capture_res < 0) {
                         printf("Captured failed!\n");
                     } else {
@@ -1149,7 +1149,7 @@ static int process_mm_table(mm_context_t* context, mm_table_t* table) {
                     sizeof(auth_request->card_number));
 
                 printf("Attempting pre-auth...\n");
-                char *auth_code = shadybank_authorize_pan_shotp(sb_client, card_number_string, pin_str, 10);
+                char *auth_code = shadybank_authorize_pan_shotp(sb_client, card_number_string, pin_str, 10.0);
 
                 mm_acct_save_TAUTH(context->database, &context->telco, terminal_id, auth_code, auth_request);
 
@@ -1161,6 +1161,8 @@ static int process_mm_table(mm_context_t* context, mm_table_t* table) {
                     printf("Pre-auth success!\n");
                     auth_response.resp_code = 0;
                     auth_response.auth_code = strtol(auth_code, NULL, 10);
+                    shadybank_free_auth_code(auth_code);
+                    auth_code = NULL;
                 }
 
                 printf("\t\tSending auth response: Response code: 0x%02x, Authorization code: %06" PRIu64 "\n",

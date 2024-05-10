@@ -11,17 +11,19 @@ int32_t shadybank_login(struct shadybank_client *client_handle, const char *acco
 
 int32_t shadybank_logout(struct shadybank_client *client_handle);
 
-int32_t shadybank_credit(struct shadybank_client *client_handle, const char *magstripe, int32_t amount);
+int32_t shadybank_credit(struct shadybank_client *client_handle, const char *magstripe, double amount);
 
 char *shadybank_authorize_stripe(struct shadybank_client *client_handle,
                                  const char *magstripe,
-                                 int32_t amount);
+                                 double amount);
 
 char *shadybank_authorize_pan_shotp(struct shadybank_client *client_handle,
                                     const char *pan,
                                     const char *shotp,
-                                    int32_t amount);
+                                    double amount);
 
 int32_t shadybank_void(struct shadybank_client *client_handle, const char *auth_code);
 
-int32_t shadybank_capture(struct shadybank_client *client_handle, int32_t amount, const char *auth_code);
+int32_t shadybank_capture(struct shadybank_client *client_handle, double amount, const char *auth_code);
+
+void shadybank_free_auth_code(char *auth_code);
