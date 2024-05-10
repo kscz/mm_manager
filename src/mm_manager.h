@@ -1356,7 +1356,7 @@ extern int hangup_modem(struct mm_serial_context *pserial_context);
 /* accounting functions */
 extern int mm_acct_create_tables(void *db);
 extern int mm_acct_save_TALARM(void *db, mm_telco_t *telco, char* terminal_id, dlog_mt_alarm_t *alarm);
-extern int mm_acct_save_TAUTH(void *db, mm_telco_t *telco, char* terminal_id, dlog_mt_funf_card_auth_t* auth_request);
+extern int mm_acct_save_TAUTH(void *db, mm_telco_t *telco, char* terminal_id, const char *auth_code, dlog_mt_funf_card_auth_t* auth_request);
 extern int mm_acct_save_TCDR(void *db, mm_telco_t *telco, char* terminal_id, dlog_mt_call_details_t *cdr);
 extern int mm_acct_save_TCALLST(void *db, mm_telco_t *telco, char* terminal_id, dlog_mt_summary_call_stats_t* summary_call_stats);
 extern int mm_acct_load_TCASHST(void *db, char* terminal_id, cashbox_status_univ_t* cashbox_status);

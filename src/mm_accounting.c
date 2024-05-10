@@ -51,7 +51,7 @@ int mm_acct_save_TALARM(void *db, mm_telco_t *telco, char *terminal_id, dlog_mt_
     return mm_sql_exec(db, sql);
 }
 
-int mm_acct_save_TAUTH(void *db, mm_telco_t *telco, char* terminal_id, dlog_mt_funf_card_auth_t* auth_request) {
+int mm_acct_save_TAUTH(void *db, mm_telco_t *telco, char* terminal_id, const char *auth_code, dlog_mt_funf_card_auth_t* auth_request) {
     char sql[512] = { 0 };
     char phone_number_string[21] = { 0 };
     char card_number_string[25] = { 0 };
@@ -79,8 +79,9 @@ int mm_acct_save_TAUTH(void *db, mm_telco_t *telco, char* terminal_id, dlog_mt_f
         exp_year = 0x2000 + auth_request->exp_yy; /* Fixme: in 2100 */
     }
 
-    printf("\t\tCard Auth request: Terminal: %s, Phone number: %s, seq=%d, card#: %s, exp: %02x/%04x, service_code: %d, PIN: %02x, ctrlflag: 0x%02x carrier: %d, Call_type: 0x%02x (%s,) card_ref_num:0x%02x, unk:0x%04x, unk2:0x%04x\n",
+    printf("\t\tCard Auth request: Terminal: %s, Auth Code: %s, Phone number: %s, seq=%d, card#: %s, exp: %02x/%04x, service_code: %d, PIN: %02x, ctrlflag: 0x%02x carrier: %d, Call_type: 0x%02x (%s,) card_ref_num:0x%02x, unk:0x%04x, unk2:0x%04x\n",
         terminal_id,
+        auth_code,
         phone_number_string,
         auth_request->seq,
         card_number_string,
@@ -98,6 +99,7 @@ int mm_acct_save_TAUTH(void *db, mm_telco_t *telco, char* terminal_id, dlog_mt_f
 
 
     snprintf(sql, sizeof(sql), "INSERT " SQL_IGNORE "INTO TAUTH ( TERMINAL_ID, RECEIVED_DATE, RECEIVED_TIME,"
+        "AUTH_CODE,"
         "INTERNATIONAL_CALL_IND,"
         "CALLED_TELEPHONE_NO,"
         "CARRIER_XREF_NUMBER,"
@@ -115,10 +117,11 @@ int mm_acct_save_TAUTH(void *db, mm_telco_t *telco, char* terminal_id, dlog_mt_f
         "FOLLOW_ON_IND,"
         "TELCO_ID, REGION_CODE"
         ") VALUES ( " \
-        " \"%s\",%s,%d,\"%s\",%d,\"%s\",%d,%04x%02x,%04x%02x,%d,%d,%d,%d,%d,%d,%d,%d," TELCO_ID_REGION_CODE ");",
+        " \"%s\",%s,%d,\"%s\",\"%s\",%d,\"%s\",%d,%04x%02x,%04x%02x,%d,%d,%d,%d,%d,%d,%d,%d," TELCO_ID_REGION_CODE ");",
         terminal_id,
         received_time_to_db_string(received_time_str, sizeof(received_time_str)),
         0,
+        auth_code,
         phone_number_string,
         auth_request->carrier_ref,
         card_number_string,
@@ -804,6 +807,7 @@ int mm_acct_create_tables(void *db) {
         "TERMINAL_ID VARCHAR(10) NOT NULL,"
         "RECEIVED_DATE VARCHAR(8) NOT NULL,"
         "RECEIVED_TIME VARCHAR(6) NOT NULL,"
+        "AUTH_CODE VARCHAR(10) NOT NULL,"
         "INTERNATIONAL_CALL_IND BOOLEAN,"
         "CALLED_TELEPHONE_NO VARCHAR(20),"
         "CARRIER_XREF_NUMBER TINYINT,"

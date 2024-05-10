@@ -33,6 +33,8 @@
 #include "mm_serial.h"
 #include "mm_udp.h"
 
+#include "shadybank_rs.h"
+
 #ifndef VERSION
 # define VERSION "Unknown"
 #endif /* VERSION */
@@ -249,7 +251,7 @@ uint8_t table_list_mtr17_intl[] = {
     0                         /* End of table list */
 };
 
-const char cmdline_options[] = "a:b:cd:e:f:hi:k:l:mn:p:qrst:uvw";
+const char cmdline_options[] = "a:b:cd:e:f:hi:k:l:mn:p:qrst:uvwx:y:z:";
 
 /* Default communication parameters, may be overridden during compile. */
 #ifndef DEFAULT_BAUD_RATE
@@ -300,6 +302,8 @@ void signal_handler(int sig) {
 }
 #endif /* _WIN32 */
 
+void *sb_client = NULL;
+
 int main(int argc, char *argv[]) {
     mm_context_t *mm_context;
     mm_table_t    mm_table;
@@ -313,6 +317,7 @@ int main(int argc, char *argv[]) {
     int   status;
     int   retries;
     int   betest = 1;
+    char *shadybank_username = NULL, *shadybank_pw = NULL, *shadybank_url = NULL;
 
     time_t rawtime;
     struct tm ptm = { 0 };
@@ -520,9 +525,18 @@ int main(int argc, char *argv[]) {
             case 'w':   /* Don't monitor carrier detect signal from modem. */
                 mm_context->connection.proto.monitor_carrier = FALSE;
                 break;
+            case 'x':
+                shadybank_username = optarg;
+                break;
+            case 'y':
+                shadybank_pw = optarg;
+                break;
+            case 'z':
+                shadybank_url = optarg;
+                break;
             case '?':
             default:
-                if ((optopt == 'f') || (optopt == 'l') || (optopt == 'a') || (optopt == 'n') || (optopt == 'b')) {
+                if ((optopt == 'f') || (optopt == 'l') || (optopt == 'a') || (optopt == 'n') || (optopt == 'b') || (optopt == 'x') || (optopt == 'y') || (optopt == 'z')) {
                     fprintf(stderr, "Option -%c requires an argument.\n", optopt);
                 } else {
                     fprintf(stderr, "Unknown option `-%c'.\n", optopt);
@@ -539,6 +553,15 @@ int main(int argc, char *argv[]) {
         }
         mm_shutdown(mm_context);
         return(-EINVAL);
+    }
+
+    printf("Attempting to login...\n");
+    sb_client = shadybank_get_client(shadybank_url);
+    if (shadybank_login(sb_client, shadybank_username, shadybank_pw) < 0) {
+        printf("Failed to login to shadybank!\n");
+        return -1;
+    } else {
+        printf("Logged into shadybank\n");
     }
 
     printf("Default Table directory: %s\n",                         mm_context->default_table_dir);
@@ -627,6 +650,12 @@ int main(int argc, char *argv[]) {
     }
 
     printf("mm_manager: Shutting down.\n");
+
+    if (shadybank_logout(sb_client) < 0) {
+        printf("Failed to logout!\n");
+    } else {
+        printf("Logout success!\n");
+    }
     mm_shutdown(mm_context);
     return 0;
 }
@@ -789,6 +818,21 @@ static int process_mm_table(mm_context_t* context, mm_table_t* table) {
                 cdr->seq = LE16(cdr->seq);
                 cdr->call_cost[0] = LE16(cdr->call_cost[0]);
                 cdr->call_cost[1] = LE16(cdr->call_cost[1]);
+
+                // If we have a card number try and capture the pre-auth
+                if (cdr->auth_code != 0) {
+                    printf("Attempting capture...\n");
+                    char auth_code[16];
+                    snprintf(auth_code, sizeof(auth_code), "%06" PRIu64, cdr->auth_code);
+                    int32_t capture_res = shadybank_capture(sb_client, ((float)cdr->call_cost[1] / 100), auth_code);
+                    if (capture_res < 0) {
+                        printf("Captured failed!\n");
+                    } else {
+                        printf("Capture success!\n");
+                    }
+                } else {
+                    printf("No auth code attached to call log, not attempting to capture\n");
+                }
 
                 mm_acct_save_TCDR(context->database, &context->telco, terminal_id, cdr);
 
@@ -1096,12 +1140,30 @@ static int process_mm_table(mm_context_t* context, mm_table_t* table) {
                 auth_request->pin = LE16(auth_request->pin);
                 auth_request->seq = LE16(auth_request->seq);
 
-                mm_acct_save_TAUTH(context->database, &context->telco, terminal_id, auth_request);
+                /* Get a pre-authorization... */
+                char pin_str[8];
+                snprintf(pin_str, sizeof(pin_str), "%04" PRIx16, 
+                        ((auth_request->pin & 0xFF) << 8) | ((auth_request->pin & 0xFF00) >> 8));
+                char card_number_string[25] = { 0 };
+                phone_num_to_string(card_number_string, sizeof(card_number_string), auth_request->card_number,
+                    sizeof(auth_request->card_number));
 
-                auth_response.resp_code = 0;
-                auth_response.auth_code = rawtime;
+                printf("Attempting pre-auth...\n");
+                char *auth_code = shadybank_authorize_pan_shotp(sb_client, card_number_string, pin_str, 10);
 
-                printf("\t\tSending auth response: Response code: 0x%02x, Authorization code: %" PRIu64 "\n",
+                mm_acct_save_TAUTH(context->database, &context->telco, terminal_id, auth_code, auth_request);
+
+                if (auth_code == NULL) {
+                    printf("Pre-auth failed!\n");
+                    auth_response.resp_code = 1;
+                    auth_response.auth_code = rawtime;
+                } else {
+                    printf("Pre-auth success!\n");
+                    auth_response.resp_code = 0;
+                    auth_response.auth_code = strtol(auth_code, NULL, 10);
+                }
+
+                printf("\t\tSending auth response: Response code: 0x%02x, Authorization code: %06" PRIu64 "\n",
                     auth_response.resp_code,
                     auth_response.auth_code);
 
@@ -1896,9 +1958,9 @@ time_t mm_time(int test_mode, time_t *rawtime) {
 }
 
 static void mm_display_help(const char *name, FILE *stream) {
-    /* "a:b:cd:e:f:hi:k:l:mn:p:qrst:uvw" */
+    /* "a:b:cd:e:f:hi:k:l:mn:p:qrst:uvwx:y:z:" */
     fprintf(stream,
-        "usage: %s [-vhmq] [-f <filename>] [-i \"modem init string\"] [-l <logfile>] [-p <pcapfile>] [-a <access_code>] [-k <key_code>] [-n <ncc_number>] [-d <default_table_dir] [-t <term_table_dir>] [-u <port>]\n",
+        "usage: %s [-vhmq] [-f <filename>] [-i \"modem init string\"] [-l <logfile>] [-p <pcapfile>] [-a <access_code>] [-k <key_code>] [-n <ncc_number>] [-d <default_table_dir] [-t <term_table_dir>] [-u <port>] [-x <shadybank_username>] [-y <shadybank_password>] [-z <shadybank_url>]\n",
         name);
     fprintf(stream,
             "\t-a <access_code> - Craft 7-digit access code (default: CRASERV)\n" \
@@ -1920,6 +1982,9 @@ static void mm_display_help(const char *name, FILE *stream) {
             "\t-t <term_table_dir> - terminal-specific table directory.\n" \
             "\t-u <port> - Send packets as UDP to <port>.\n" \
             "\t-v verbose (multiple v's increase verbosity.\n" \
-            "\t-w - don't monitor the modem for carrier loss.\n");
+            "\t-w - don't monitor the modem for carrier loss.\n" \
+            "\t-x username for shadybank\n" \
+            "\t-y password for shadybank\n" \
+            "\t-z URL for shadybank backend\n");
     return;
 }
