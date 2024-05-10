@@ -1,5 +1,8 @@
 # Millennium Manager - mm_manager
 
+# Changes needed for Shadybank Integration
+
+In order to build this project you'll need a copy of [shadybank_rs](https://github.com/kscz/shadybank_rs) - take the output static library (`libshadybank_rs.a`) and put it in the root of this project.
 
 ### Manager for Nortel Millennium Payphones
 
